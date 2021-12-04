@@ -6,6 +6,9 @@ import java.util.*;
  */
 public class Symb {
     private Type type;
+    private int localOffset; //Local offset the instance of Symb
+    private static boolean global; //In global or local scope
+    private static int currentOffset; //The current offset being used
     
     public Symb(Type type) {
         this.type = type;
@@ -17,6 +20,30 @@ public class Symb {
     
     public String toString() {
         return type.toString();
+    }
+
+    public void setLocOffset(int offset){
+        localOffset = offset;
+    }
+
+    public int getLocOffset(){
+        return localOffset;
+    }
+
+    public static void setCurrOffset(int offset){
+        currentOffset = offset;
+    }
+
+    public static int getCurrOffset(){
+        return currentOffset;
+    }
+
+    public static void setGlobal(boolean isGlobal){
+        global = isGlobal;
+    }
+
+    public static boolean isGlobal(){
+        return global;
     }
 }
 

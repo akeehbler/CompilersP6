@@ -134,7 +134,13 @@ class ProgramNode extends ASTnode {
      */
     public void nameAnalysis() {
         SymTable symTab = new SymTable();
+        Symb.setGlobal(true); //We are global so set appropriate vars
+        Symb.setCurrOffset(0);
         myDeclList.nameAnalysis(symTab);
+        Symb mainSym = symTab.lookupGlobal("main");
+        if(mainSym == null || !mainSym.getType().isFnType()){
+            ErrMsg.fatal(0, 0, "No main function");
+        }
     }
     
     /**
@@ -172,9 +178,15 @@ class DeclListNode extends ASTnode {
      * decls in the list.
      */    
     public void nameAnalysis(SymTable symTab, SymTable globalTab) {
+        int offset = Symb.getCurrOffset();
         for (DeclNode node : myDecls) {
             if (node instanceof VarDeclNode) {
-                ((VarDeclNode)node).nameAnalysis(symTab, globalTab);
+                Symb currSym = ((VarDeclNode)node).nameAnalysis(symTab, globalTab);
+                if(!Symb.isGlobal()){
+                    currSym.setLocOffset(offset);
+                    offset -= 4; //for next setting
+                    Symb.setCurrOffset(offset);
+                }
             } else {
                 node.nameAnalysis(symTab);
             }
@@ -219,10 +231,15 @@ class FormalsListNode extends ASTnode {
      *     if there was no error, add type of formal decl to list
      */
     public List<Type> nameAnalysis(SymTable symTab) {
+        int offset = 0;
         List<Type> typeList = new LinkedList<Type>();
         for (FormalDeclNode node : myFormals) {
             Symb sym = node.nameAnalysis(symTab);
             if (sym != null) {
+                //set the offset for this symbol, then decrement for later syms
+                sym.setLocOffset(offset);
+                offset -= 4;
+                Symb.setCurrOffset(offset);
                 typeList.add(sym.getType());
             }
         }
@@ -477,6 +494,7 @@ class VarDeclNode extends DeclNode {
             } 
         }
         
+        
         return sym;
     }    
     
@@ -551,14 +569,24 @@ class FnDeclNode extends DeclNode {
         
         symTab.addScope();  // add a new scope for locals and params
         
+        //Set back to local now that we are in a function
+        Symb.setGlobal(false);
+
         // process the formals
         List<Type> typeList = myFormalsList.nameAnalysis(symTab);
         if (sym != null) {
             sym.addFormals(typeList);
+
+            //TODO: Param Bytes?
         }
-        
+        //Decrement by 8 (store return addr and control link = 8)
+        Symb.setCurrOffset(Symb.getCurrOffset() - 8);
+        int offsetNoLocs = Symb.getCurrOffset();
+
         myBody.nameAnalysis(symTab); // process the function body
         
+        //TODO: Bytes
+
         try {
             symTab.removeScope();  // exit scope
         } catch (EmptySymTableException ex) {
@@ -567,6 +595,10 @@ class FnDeclNode extends DeclNode {
             System.exit(-1);
         }
         
+        //Set back to global since exiting function
+        Symb.setGlobal(true);
+        Symb.setCurrOffset(0);
+
         return null;
     } 
        
