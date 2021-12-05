@@ -149,6 +149,10 @@ class ProgramNode extends ASTnode {
     public void typeCheck() {
         myDeclList.typeCheck();
     }
+
+    public void codeGen(){
+        myDeclList.codeGen();
+    }
     
     public void unparse(PrintWriter p, int indent) {
         myDeclList.unparse(p, indent);
@@ -200,6 +204,19 @@ class DeclListNode extends ASTnode {
         for (DeclNode node : myDecls) {
             node.typeCheck();
         }
+    }
+
+    public void codeGen(){
+        for(DeclNode node : myDecls) {
+            //TODO: do we even need this check here?
+            if(node instanceof VarDeclNode || node instanceof FnDeclNode){
+                node.codeGen();
+            }
+        }
+    }
+    //TODO: make sure this is right for getting number of local vars
+    public int numVars() {
+        return myDecls.size();
     }
     
     public void unparse(PrintWriter p, int indent) {
@@ -263,6 +280,7 @@ class FormalsListNode extends ASTnode {
             }
         } 
     }
+    
 
     // list of kids (FormalDeclNodes)
     private List<FormalDeclNode> myFormals;
@@ -290,11 +308,20 @@ class FnBodyNode extends ASTnode {
      */
     public void typeCheck(Type retType) {
         myStmtList.typeCheck(retType);
-    }    
+    }
+    
+    //TODO: String meaning?
+    public void codeGen(String funcEndLabel){
+        myStmtList.codeGen(funcEndLabel);
+    }
           
     public void unparse(PrintWriter p, int indent) {
         myDeclList.unparse(p, indent);
         myStmtList.unparse(p, indent);
+    }
+
+    public int numLocals(){
+        return myDeclList.numVars();
     }
 
     // 2 kids
@@ -323,6 +350,13 @@ class StmtListNode extends ASTnode {
     public void typeCheck(Type retType) {
         for(StmtNode node : myStmts) {
             node.typeCheck(retType);
+        }
+    }
+
+    //TODO: String meaning?
+    public void codeGen(String funcEndLabel){
+        for(StmtNode stmt : myStmts){
+            stmt.codeGen(funcEndLabel);
         }
     }
     
@@ -377,6 +411,12 @@ class ExpListNode extends ASTnode {
         } catch (NoSuchElementException e) {
             System.err.println("unexpected NoSuchElementException in ExpListNode.typeCheck");
             System.exit(-1);
+        }
+    }
+
+    public void codeGen(){
+        for(ExpNode exp : myExps) {
+            exp.codeGen();
         }
     }
     
@@ -496,7 +536,18 @@ class VarDeclNode extends DeclNode {
         
         
         return sym;
-    }    
+    }
+    
+    public void codeGen(){
+        //Only generate if global
+        if(Symb.isGlobal()){
+            Codegen.generate(".data");
+            Codegen.generate(".align 2");
+            //TODO: Since not dealing with structs everything should be size 4?
+            Codegen.generateLabeled("_" + myId.name(), ".space ", "", "4");
+            myId.sym().setLocOffset(1);
+        }
+    }
     
     public void unparse(PrintWriter p, int indent) {
         addIndent(p, indent);
@@ -576,8 +627,8 @@ class FnDeclNode extends DeclNode {
         List<Type> typeList = myFormalsList.nameAnalysis(symTab);
         if (sym != null) {
             sym.addFormals(typeList);
-
-            //TODO: Param Bytes?
+            //TODO: Remeber to remove this or add back in if need it
+            //sym.setParamBytes(myFormalsList.length() * 4);
         }
         //Decrement by 8 (store return addr and control link = 8)
         Symb.setCurrOffset(Symb.getCurrOffset() - 8);
@@ -585,7 +636,8 @@ class FnDeclNode extends DeclNode {
 
         myBody.nameAnalysis(symTab); // process the function body
         
-        //TODO: Bytes
+        sym.setLocalBytes(offsetNoLocs - Symb.getCurrOffset());
+        //Might have to -= size of calle saved regs
 
         try {
             symTab.removeScope();  // exit scope
@@ -607,6 +659,74 @@ class FnDeclNode extends DeclNode {
      */
     public void typeCheck() {
         myBody.typeCheck(myType.type());
+    }
+
+    public void codeGen(){
+        
+        String funcEndLabel = Codegen.nextLabel();
+        //Generate the text first since function
+        Codegen.generate(".text");
+        if(myId.name().equals("main")){
+            //TODO: Is this right?
+            Codegen.generate(".globl main");
+            Codegen.genLabel("main");
+            Codegen.genLabel("__start");
+        } else{
+            Codegen.genLabel("_" + myId.name());
+        }
+        //Set to local scope since in function
+        Symb.setGlobal(false);
+
+        //push the return addr
+        Codegen.genPush(Codegen.RA);
+
+        //Push old frame pointer into Control Link
+        Codegen.genPush(Codegen.FP);
+        
+        //Get the sym as we are going to need these for the bytes needed
+        FnSymb sym = (FnSymb) myId.sym();
+        //Calc new frame pointer which should be bottom of the AR (num Params *4  + 8)
+        Codegen.generate("addu", Codegen.FP, Codegen.SP, sym.getNumParams() * 4 + 8);
+
+        // Push the space needed for locals
+        Codegen.generate("subu", Codegen.SP, Codegen.SP, myBody.numLocals() * 4);
+        
+        //Generate for the function body
+        myBody.codeGen(funcEndLabel);
+
+        //----------- Function Exit-------------
+
+        // Place the exit label
+        //TODO: Might need to deal with nested functions in which case this would be the last seen function label not just this one
+        Codegen.genLabel(funcEndLabel);
+
+        //TODO: I think this is right?
+        //If it's not a void function, save the return value in v0
+        if(!myType.type().isVoidType()){
+            Codegen.genPop(Codegen.V0);
+        }
+
+        //Load the return address 
+        Codegen.generateIndexed("lw", Codegen.RA, Codegen.FP, -4 * sym.getNumParams());
+
+        //Save the control link
+        Codegen.generate("move", Codegen.T0, Codegen.FP);
+
+        //Restore the frame pointer
+        Codegen.generateIndexed("lw", Codegen.FP, Codegen.FP, ((-4 * sym.getNumParams()) - 4));
+
+        //Restore the stack pointer
+        Codegen.generate("move", Codegen.SP, Codegen.T0);
+
+        //Return from the function
+        if(myId.name().equals("main")){
+            Codegen.generate("li", Codegen.V0, 10);
+            Codegen.generate("syscall");
+        } else{
+            Codegen.generate("jr", Codegen.RA);
+        }
+        //TODO: If we have to deal with nested functions then might want to make this boolean a "Depth variable" instead and decrement
+        Symb.setGlobal(true);
     }
         
     public void unparse(PrintWriter p, int indent) {
