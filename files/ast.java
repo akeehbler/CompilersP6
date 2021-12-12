@@ -205,10 +205,10 @@ class DeclListNode extends ASTnode {
             node.typeCheck();
         }
     }
-
+    
     public void codeGen(){
         for(DeclNode node : myDecls) {
-            //TODO: do we even need this check here?
+            // Might not need this check, just for safety
             if(node instanceof VarDeclNode || node instanceof FnDeclNode){
                 node.codeGen();
             }
@@ -310,7 +310,6 @@ class FnBodyNode extends ASTnode {
         myStmtList.typeCheck(retType);
     }
     
-    //TODO: String meaning?
     public void codeGen(String funcEndLabel){
         myStmtList.codeGen(funcEndLabel);
     }
@@ -353,7 +352,6 @@ class StmtListNode extends ASTnode {
         }
     }
 
-    //TODO: String meaning?
     public void codeGen(String funcEndLabel){
         for(StmtNode stmt : myStmts){
             stmt.codeGen(funcEndLabel);
@@ -445,6 +443,7 @@ abstract class DeclNode extends ASTnode {
      */
     abstract public Symb nameAnalysis(SymTable symTab);
 
+    abstract public void codeGen();
     // default version of typeCheck for non-function decls
     public void typeCheck() { }
 }
@@ -543,7 +542,7 @@ class VarDeclNode extends DeclNode {
         if(Symb.isGlobal()){
             Codegen.generate(".data");
             Codegen.generate(".align 2");
-            //TODO: Since not dealing with structs everything should be size 4?
+            //NOTE: Since not dealing with structs everything should be size 4?
             Codegen.generateLabeled("_" + myId.name(), ".space ", "", "4");
             myId.sym().setLocOffset(1);
         }
@@ -636,6 +635,7 @@ class FnDeclNode extends DeclNode {
 
         myBody.nameAnalysis(symTab); // process the function body
         
+        //TODO: Remove this if other method works
         sym.setLocalBytes(offsetNoLocs - Symb.getCurrOffset());
         //Might have to -= size of calle saved regs
 
@@ -667,7 +667,6 @@ class FnDeclNode extends DeclNode {
         //Generate the text first since function
         Codegen.generate(".text");
         if(myId.name().equals("main")){
-            //TODO: Is this right?
             Codegen.generate(".globl main");
             Codegen.genLabel("main");
             Codegen.genLabel("__start");
@@ -806,6 +805,10 @@ class FormalDeclNode extends DeclNode {
         myType.unparse(p, 0);
         p.print(" ");
         p.print(myId.name());
+    }
+
+    public void codeGen(){
+        //Nothing need this because of abstract function
     }
 
     // 2 kids
@@ -976,7 +979,6 @@ class StructNode extends TypeNode {
 abstract class StmtNode extends ASTnode {
     abstract public void nameAnalysis(SymTable symTab);
     abstract public void typeCheck(Type retType);
-    //TODO 
     abstract public void codeGen();
     abstract public void codeGen(String funcEndLabel);
 
@@ -1007,7 +1009,7 @@ class AssignStmtNode extends StmtNode {
     }
 
     public void codeGen(String funcEndLabel){
-        myAssign.codeGen();
+        codeGen();
     }
         
     public void unparse(PrintWriter p, int indent) {
@@ -1104,7 +1106,7 @@ class PreDecStmtNode extends StmtNode {
         //TODO: Is this right for Pre vs Post?
         if(myExp instanceof IdNode){
             //TODO: Do we even need the address gen/
-            ((IdNode)myExp).genAddr();
+            ((IdNode)myExp).genAddress();
             myExp.codeGen();
             Codegen.genPop(Codegen.T0); // The value
             Codegen.genPop(Codegen.T1); // Address
@@ -1163,7 +1165,20 @@ class ReceiveStmtNode extends StmtNode {
     }
 
     public void codeGen(){
-        //TODO:
+        myExp.codeGen();
+        //Do the system call for a recieve node (5)
+        Codegen.generate("li", Codegen.V0, 5);
+        Codegen.generate("syscall");
+        Codegen.genPop(Codegen.T0);
+        //Put the value from V0 into idNode
+        IdNode node = (IdNode) myExp;
+        node.genAddress();
+        if(node.sym().getType().isBoolType()){
+            Codegen.generate("sne", Codegen.T1, Codegen.V0, Codegen.FALSE);
+            Codegen.generateIndexed("sw", Codegen.T1, Codegen.T0, 0);
+        }else{
+            Codegen.generateIndexed("sw", Codegen.V0, Codegen.T0, 0);
+        }
     }
 
     public void codeGen(String funcEndLabel) {
@@ -1222,7 +1237,22 @@ class PrintStmtNode extends StmtNode {
     }
 
     public void codeGen(){
-        //TODO: This one is hard
+        
+        myExp.codeGen();
+        //pop the expression
+        Codegen.genPop(Codegen.A0);
+
+        //syscall for int it 1
+        if (myExp.typeCheck().isIntType() || myExp.typeCheck().isBoolType()) {
+            Codegen.generate("li", Codegen.V0, 1);
+        } else if (myExp.typeCheck().isStringType()) { //syscall for string is 4
+            Codegen.generate("li", Codegen.V0, 4);
+        } else {
+            // do nothing
+        }
+
+        // generate syscall
+        Codegen.generate("syscall");
     }
 
     public void codeGen(String funcEndLabel){
@@ -1296,7 +1326,7 @@ class IfStmtNode extends StmtNode {
         Codegen.generate("beqz", Codegen.T0, falseLabel);
         //Generate the code for the true conidtion
         //TODO: do I need both decl and stmt list codeGens here
-        myDeclList.codeGen();
+        //myDeclList.codeGen();
         myStmtList.codeGen(funcEndLabel);
         //Put in the false label
         Codegen.genLabel(falseLabel);
@@ -1394,16 +1424,17 @@ class IfElseStmtNode extends StmtNode {
         Codegen.generate("beqz", Codegen.T0, falseLabel);
         //Handle "Then" portion
         //TODO: do I need both stmt and decl here?
-        myThenDeclList.codeGen();
+        //myThenDeclList.codeGen();
         myThenStmtList.codeGen(funcEndLabel);
         //Unconditional branch to the exit label after done
         Codegen.generate("b", exitLabel);
         //Else statement code
         Codegen.genLabel(falseLabel);
         //TODO: Do I need both of these?
-        myElseDeclList.codeGen();
+        //myElseDeclList.codeGen();
         myElseStmtList.codeGen(funcEndLabel);
         //Put the exit label in after false label
+        Codegen.genLabel(exitLabel);
     }
         
     public void unparse(PrintWriter p, int indent) {
@@ -1487,9 +1518,9 @@ class WhileStmtNode extends StmtNode {
         Codegen.genLabel(startLabel);
         myExp.codeGen();
         Codegen.genPop(Codegen.T0);
-        Codegen.generate("beq", Codegen.T0, Codegen.FALSE, exitLabel);
+        Codegen.generate("beqz", Codegen.T0, exitLabel);
         //TODO: Both stmt and decls or just stmts
-        myDeclList.codeGen();
+        //myDeclList.codeGen();
         myStmtList.codeGen(funcEndLabel);
         //Branch back to the start label after body exectued if it went in there
         Codegen.generate("b", startLabel);
@@ -1671,12 +1702,13 @@ class ReturnStmtNode extends StmtNode {
     }
 
     public void codeGen(String funcEndLabel){
-        //TODO: is this condition right and do we have to pop V0?
+        //Make sure it's not void or exp is null, if not then pop the return value of V0
         if(myExp != null && !myExp.typeCheck().isVoidType()){
             myExp.codeGen();
             Codegen.genPop(Codegen.V0);
         }
-        //TODO: Might have to change this to lastSeen function but passing thru might also work
+        //NOTE: Might have to change this to lastSeen function but passing thru might also work
+        //Worried mainly about nested functions
         Codegen.generate("b", funcEndLabel);
     }
     
@@ -1781,7 +1813,7 @@ class StringLitNode extends ExpNode {
     }
 
     public void codeGen(){
-        //TODO: Might want something to keep track on strings, like a map to get the label if already exists
+        //NOTE: Might want something to keep track on strings, like a map to get the label if already exists
         String label = Codegen.nextLabel();
         Codegen.generate(".data");
         Codegen.generateLabeled(label, ".asciiz ", "", myStrVal);
@@ -1964,7 +1996,7 @@ class IdNode extends ExpNode {
         Codegen.genPush(Codegen.T0);
     }
 
-    //TODO: Might not need this
+    //Need this for getting addresses
     public void genAddress(){
         int localOffset = mySymb.getLocOffset();
         //Check if local or not
@@ -2409,7 +2441,7 @@ abstract class BinaryExpNode extends ExpNode {
         myExp1.codeGen();
         myExp2.codeGen();
 
-        //Put the values into the registers
+        //Put respective values into temp registers
         Codegen.genPop(Codegen.T1);
         Codegen.genPop(Codegen.T0);
     }
@@ -2457,7 +2489,8 @@ class UnaryMinusNode extends UnaryExpNode {
         //multiply it by -1 which acts as unary minus
         Codegen.generate("li", Codegen.T1, -1);
         Codegen.generate("mult", Codegen.T0, Codegen.T1);
-        Codegen.generate("mflo", Codegen.T0);
+        //TODO: don't think mflo is needed
+        //Codegen.generate("mflo", Codegen.T0);
         //Push to the stack
         Codegen.genPush(Codegen.T0);
     }
@@ -2723,7 +2756,7 @@ class TimesNode extends ArithmeticExpNode {
         //TODO: Do we need the push or the mflo?
         this.binaryNodeGenerate();
         Codegen.generate("mult", Codegen.T0, Codegen.T1);
-        Codegen.generate("mflo", Codegen.T0);
+        //Codegen.generate("mflo", Codegen.T0);
         Codegen.genPush(Codegen.T0);
     }
 }
@@ -2745,7 +2778,7 @@ class DivideNode extends ArithmeticExpNode {
         //TODO: Do we need the push or the mflo? (think we need the push)
         this.binaryNodeGenerate();
         Codegen.generate("div", Codegen.T0, Codegen.T0, Codegen.T1);
-        Codegen.generate("mflo", Codegen.T0);
+        //Codegen.generate("mflo", Codegen.T0);
         Codegen.genPush(Codegen.T0);
     }
 }
@@ -2763,9 +2796,24 @@ class AndNode extends LogicalExpNode {
         p.print(")");
     }
 
-    //TODO: Make sure this is short circuited (don't think it is)
     public void codeGen(){
-        //TODO: Don't really understand the code here
+        // get a label for if the expression is short circuited
+        String shortCircLabel = Codegen.nextLabel();
+        // generate code for the left side and get its value
+        myExp1.codeGen();
+        Codegen.genPop(Codegen.T0);
+        //see if return value is true
+        Codegen.generate("seq", Codegen.T1, Codegen.T0, Codegen.TRUE);
+        //If it actually isn't true then jump to the end without evaluating the right hand side
+        Codegen.generate("bne", Codegen.T1, Codegen.TRUE, shortCircLabel);
+        // if left is true then move on to the right
+        myExp2.codeGen();
+        Codegen.genPop(Codegen.T0);
+        //If get here then check if rhs is true or not, this will be the result no matter what
+        Codegen.generate("seq", Codegen.T1, Codegen.T0, Codegen.TRUE);
+        // Result always stored in T1
+        Codegen.genLabel(shortCircLabel);
+        Codegen.genPush(Codegen.T1);
     }
 }
 
@@ -2783,7 +2831,22 @@ class OrNode extends LogicalExpNode {
     }
 
     public void codeGen(){
-        //TODO:
+        // get a label for if the expression is short circuited
+        String shortCircLabel = Codegen.nextLabel();
+        // generate code for the left side and get its value
+        myExp1.codeGen();
+        Codegen.genPop(Codegen.T0);
+        //Check if the value is true, and put it in T1
+        Codegen.generate("seq", Codegen.T1, Codegen.T0, Codegen.TRUE);
+        //If it was true, then go to the shortCirc label
+        Codegen.generate("beq", Codegen.T0, Codegen.T1, shortCircLabel);
+        // if left is false then eval the right side
+        myExp2.codeGen();
+        Codegen.genPop(Codegen.T0);
+        Codegen.generate("seq", Codegen.T1, Codegen.T0, Codegen.TRUE);
+        // Result always in T1 so push it
+        Codegen.genLabel(shortCircLabel);
+        Codegen.genPush(Codegen.T1);
     }
 }
 
