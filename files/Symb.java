@@ -57,16 +57,11 @@ class FnSymb extends Symb {
     private Type returnType;
     private int numParams;
     private List<Type> paramTypes;
-    //TODO: Remember to Remove Bytes stuff if don't need it
-    private int paramBytes;
-    private int locBytes;
     
     public FnSymb(Type type, int numparams) {
         super(new FnType());
         returnType = type;
         numParams = numparams;
-        paramBytes = 0;
-        locBytes = 0;
     }
 
     public void addFormals(List<Type> L) {
@@ -101,21 +96,6 @@ class FnSymb extends Symb {
         return str;
     }
 
-    public void setParamBytes(int numBytes){
-        this.paramBytes = numBytes;
-    }
-
-    public int getParamBytes(){
-        return this.paramBytes;
-    }
-
-    public void setLocalBytes(int numBytes){
-        this.locBytes = numBytes;
-    }
-
-    public int getLocalBytes(){
-        return this.locBytes;
-    }
 }
 
 /**

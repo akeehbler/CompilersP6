@@ -214,7 +214,7 @@ class DeclListNode extends ASTnode {
             }
         }
     }
-    //TODO: make sure this is right for getting number of local vars
+    
     public int numVars() {
         return myDecls.size();
     }
@@ -626,18 +626,12 @@ class FnDeclNode extends DeclNode {
         List<Type> typeList = myFormalsList.nameAnalysis(symTab);
         if (sym != null) {
             sym.addFormals(typeList);
-            //TODO: Remeber to remove this or add back in if need it
-            //sym.setParamBytes(myFormalsList.length() * 4);
         }
         //Decrement by 8 (store return addr and control link = 8)
         Symb.setCurrOffset(Symb.getCurrOffset() - 8);
         int offsetNoLocs = Symb.getCurrOffset();
 
         myBody.nameAnalysis(symTab); // process the function body
-        
-        //TODO: Remove this if other method works
-        sym.setLocalBytes(offsetNoLocs - Symb.getCurrOffset());
-        //Might have to -= size of calle saved regs
 
         try {
             symTab.removeScope();  // exit scope
@@ -696,14 +690,7 @@ class FnDeclNode extends DeclNode {
         //----------- Function Exit-------------
 
         // Place the exit label
-        //TODO: Might need to deal with nested functions in which case this would be the last seen function label not just this one
         Codegen.genLabel(funcEndLabel);
-
-        //TODO: I think this is right? Maybe just do this in return Stmt Node
-        //If it's not a void function, save the return value in v0
-        /*if(!myType.type().isVoidType()){
-            Codegen.genPop(Codegen.V0);
-        }*/
 
         //Load the return address 
         Codegen.generateIndexed("lw", Codegen.RA, Codegen.FP, -4 * sym.getNumParams());
@@ -724,7 +711,6 @@ class FnDeclNode extends DeclNode {
         } else{
             Codegen.generate("jr", Codegen.RA);
         }
-        //TODO: If we have to deal with nested functions then might want to make this boolean a "Depth variable" instead and decrement
         Symb.setGlobal(true);
     }
         
@@ -1048,10 +1034,8 @@ class PreIncStmtNode extends StmtNode {
     }
 
     public void codeGen(){
-        //TODO: not sure if this is right for preInc vs postInc
         if(myExp instanceof IdNode){
             //Get the address
-            //TODO: do we even need this genAddr function?
             ((IdNode) myExp).genAddress();
             //generate code for the expression
             myExp.codeGen();
@@ -1103,9 +1087,7 @@ class PreDecStmtNode extends StmtNode {
     }
 
     public void codeGen(){
-        //TODO: Is this right for Pre vs Post?
         if(myExp instanceof IdNode){
-            //TODO: Do we even need the address gen/
             ((IdNode)myExp).genAddress();
             myExp.codeGen();
             Codegen.genPop(Codegen.T0); // The value
@@ -1321,12 +1303,9 @@ class IfStmtNode extends StmtNode {
         String falseLabel = Codegen.nextLabel();
         //Eval the condition
         myExp.codeGen();
-        //TODO: is the bottom part right?
         Codegen.genPop(Codegen.T0);
         Codegen.generate("beqz", Codegen.T0, falseLabel);
         //Generate the code for the true conidtion
-        //TODO: do I need both decl and stmt list codeGens here
-        //myDeclList.codeGen();
         myStmtList.codeGen(funcEndLabel);
         //Put in the false label
         Codegen.genLabel(falseLabel);
@@ -1423,15 +1402,11 @@ class IfElseStmtNode extends StmtNode {
         //Go to false label if expression is 0
         Codegen.generate("beqz", Codegen.T0, falseLabel);
         //Handle "Then" portion
-        //TODO: do I need both stmt and decl here?
-        //myThenDeclList.codeGen();
         myThenStmtList.codeGen(funcEndLabel);
         //Unconditional branch to the exit label after done
         Codegen.generate("b", exitLabel);
         //Else statement code
         Codegen.genLabel(falseLabel);
-        //TODO: Do I need both of these?
-        //myElseDeclList.codeGen();
         myElseStmtList.codeGen(funcEndLabel);
         //Put the exit label in after false label
         Codegen.genLabel(exitLabel);
@@ -1519,8 +1494,6 @@ class WhileStmtNode extends StmtNode {
         myExp.codeGen();
         Codegen.genPop(Codegen.T0);
         Codegen.generate("beqz", Codegen.T0, exitLabel);
-        //TODO: Both stmt and decls or just stmts
-        //myDeclList.codeGen();
         myStmtList.codeGen(funcEndLabel);
         //Branch back to the start label after body exectued if it went in there
         Codegen.generate("b", startLabel);
@@ -1983,7 +1956,6 @@ class IdNode extends ExpNode {
         return null;
     }
 
-    //TODO: Not sure if this is right
     public void codeGen(){
         int localOffset = mySymb.getLocOffset();
         //Check if local or not
@@ -2009,7 +1981,6 @@ class IdNode extends ExpNode {
         Codegen.genPush(Codegen.T0);
     }
 
-    //TODO: do we need this?
     public void genJumpLink(){
         if(myStrVal.equals("main")){
             Codegen.generate("jal", myStrVal);
@@ -2264,7 +2235,6 @@ class AssignNode extends ExpNode {
 
         //Store the value into the address given
         Codegen.generateIndexed("sw", Codegen.T0, Codegen.T1, 0);
-        //TODO: Maybe push T0 here?
     }
     
     public void unparse(PrintWriter p, int indent) {
@@ -2344,12 +2314,10 @@ class CallExpNode extends ExpNode {
         return fnSymb.getReturnType();
     }
 
-    //TODO: this might not be right
     public void codeGen(){
         //Call the expression list (pushes params onto stack)
         myExpList.codeGen();
         myId.genJumpLink();
-        //TODO: Might need to generate add to remove the params here
         //push the return val onto stack if non void
         if(!((FnSymb)myId.sym()).getReturnType().isVoidType()){
             Codegen.genPush(Codegen.V0);
@@ -2480,7 +2448,6 @@ class UnaryMinusNode extends UnaryExpNode {
         return retType;
     }
 
-    //TODO: Not sure if this is right?
     public void codeGen(){
         //Push the expression onto stack 
         myExp.codeGen();
@@ -2489,8 +2456,6 @@ class UnaryMinusNode extends UnaryExpNode {
         //multiply it by -1 which acts as unary minus
         Codegen.generate("li", Codegen.T1, -1);
         Codegen.generate("mult", Codegen.T0, Codegen.T1);
-        //TODO: don't think mflo is needed
-        //Codegen.generate("mflo", Codegen.T0);
         //Push to the stack
         Codegen.genPush(Codegen.T0);
     }
@@ -2531,7 +2496,6 @@ class NotNode extends UnaryExpNode {
         myExp.codeGen();
         Codegen.genPop(Codegen.T0);
         Codegen.generate("not", Codegen.T0, Codegen.T0);
-        //TODO: Do I need to push this here?
         Codegen.genPush(Codegen.T0);
     }
 
@@ -2712,7 +2676,6 @@ class PlusNode extends ArithmeticExpNode {
     public void codeGen(){
         this.binaryNodeGenerate();
         Codegen.generate("add", Codegen.T0, Codegen.T0, Codegen.T1);
-        //TODO: push the result (is this needed?)
         Codegen.genPush(Codegen.T0);
     }
 }
@@ -2733,7 +2696,6 @@ class MinusNode extends ArithmeticExpNode {
     public void codeGen(){
         this.binaryNodeGenerate();
         Codegen.generate("sub", Codegen.T0, Codegen.T0, Codegen.T1);
-        //TODO: Push the result (is this needed?)
         Codegen.genPush(Codegen.T0);
     }
 }
@@ -2753,10 +2715,8 @@ class TimesNode extends ArithmeticExpNode {
     }
 
     public void codeGen(){
-        //TODO: Do we need the push or the mflo?
         this.binaryNodeGenerate();
         Codegen.generate("mult", Codegen.T0, Codegen.T1);
-        //Codegen.generate("mflo", Codegen.T0);
         Codegen.genPush(Codegen.T0);
     }
 }
@@ -2775,10 +2735,8 @@ class DivideNode extends ArithmeticExpNode {
     }
 
     public void codeGen(){
-        //TODO: Do we need the push or the mflo? (think we need the push)
         this.binaryNodeGenerate();
         Codegen.generate("div", Codegen.T0, Codegen.T0, Codegen.T1);
-        //Codegen.generate("mflo", Codegen.T0);
         Codegen.genPush(Codegen.T0);
     }
 }
